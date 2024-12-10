@@ -10,8 +10,8 @@ from sqlalchemy import Integer, String, Text
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 # Import your forms from the forms.py
-from forms import CreatePostForm, RegisterForm, LoginForm
-
+from forms import CreatePostForm, RegisterForm, LoginForm, CommentForm
+from flask_gravatar import Gravatar
 
 '''
 Make sure the required packages are installed: 
@@ -52,25 +52,51 @@ db.init_app(app)
 # CONFIGURE TABLES
 class BlogPost(db.Model):
     __tablename__ = "blog_posts"
+
+    author_id: Mapped[int] = mapped_column(Integer, db.ForeignKey("users.id"))
+    author = relationship("User", back_populates='posts')
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     title: Mapped[str] = mapped_column(String(250), unique=True, nullable=False)
     subtitle: Mapped[str] = mapped_column(String(250), nullable=False)
     date: Mapped[str] = mapped_column(String(250), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
-    author: Mapped[str] = mapped_column(String(250), nullable=False)
     img_url: Mapped[str] = mapped_column(String(250), nullable=False)
+    comments = relationship("Comment", back_populates="parent_post")
 
 
 # TODO: Create a User table for all your registered users. 
 class User(UserMixin, db.Model):
-    __tablename__ = "Users1"
+    __tablename__ = "users"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     email: Mapped[str] = mapped_column(String(100), nullable= False, unique=True)
     password: Mapped[str] = mapped_column(String, nullable=False)
-    
+    posts = relationship('BlogPost', back_populates="author")
+    comments = relationship("Comment", back_populates="comment_author")
+
+class Comment(db.Model):
+    __tablename__ =  "comments"
+    id:Mapped[int] = mapped_column(Integer, primary_key=True )
+    text:Mapped[str] = mapped_column(Text, nullable=False)
+    author_id: Mapped[int] = mapped_column(Integer, db.ForeignKey("users.id"))
+    comment_author = relationship("User", back_populates="comments")
+    post_id: Mapped[int] = mapped_column(Integer, db.ForeignKey("blog_posts.id"))
+    parent_post = relationship("BlogPost", back_populates="comments")
+
 with app.app_context():
     db.create_all()
+
+
+
+# For adding profile images to the comment section
+gravatar = Gravatar(app,
+                    size=100,
+                    rating='g',
+                    default='retro',
+                    force_default=False,
+                    force_lower=False,
+                    use_ssl=False,
+                    base_url=None)
 
 def admin_only(func):
     @wraps(func)
@@ -103,7 +129,7 @@ def register():
             return redirect(url_for('login'))
 
         new_user = User(
-            email,
+            email=email,
             name=form.name.data,
             password=hash_and_salted_password,
         )
@@ -150,12 +176,28 @@ def get_all_posts():
 @app.route("/post/<int:post_id>")
 def show_post(post_id):
     requested_post = db.get_or_404(BlogPost, post_id)
-    return render_template("post.html", post=requested_post, current_user=current_user)
+     # Add the CommentForm to the route
+    comment_form = CommentForm()
+    # Only allow logged-in users to comment on posts
+    if comment_form.validate_on_submit():
+        if not current_user.is_authenticated:
+            flash("You need to login or register to comment.")
+            return redirect(url_for("login"))
+
+        new_comment = Comment(
+            text=comment_form.comment_text.data,
+            comment_author=current_user,
+            parent_post=requested_post
+        )
+        db.session.add(new_comment)
+        db.session.commit()
+    return render_template("post.html", post=requested_post, current_user=current_user, form = comment_form)
 
 
 # TODO: Use a decorator so only an admin user can create a new post
-@admin_only
+
 @app.route("/new-post", methods=["GET", "POST"])
+@admin_only
 def add_new_post():
     form = CreatePostForm()
     if form.validate_on_submit():
@@ -174,8 +216,8 @@ def add_new_post():
 
 
 # TODO: Use a decorator so only an admin user can edit a post
-@admin_only
 @app.route("/edit-post/<int:post_id>", methods=["GET", "POST"])
+@admin_only
 def edit_post(post_id):
     post = db.get_or_404(BlogPost, post_id)
     edit_form = CreatePostForm(
