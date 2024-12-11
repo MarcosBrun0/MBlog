@@ -34,12 +34,19 @@ Bootstrap5(app)
 # TODO: Configure Flask-Login
 login_manager = LoginManager()
 login_manager.init_app(app)
+login_manager.login_view = "login" 
 
 
 # Create a user_loader callback
 @login_manager.user_loader
 def load_user(user_id):
-    return db.get_or_404(User, user_id)
+    # Verifica se o ID do usuário está no formato esperado
+    try:
+        user = db.session.execute(db.select(User).where(User.id == int(user_id))).scalar()
+        return user
+    except Exception as e:
+        print(f"Erro ao carregar usuário: {e}")
+        return None
 
 # CREATE DATABASE
 class Base(DeclarativeBase):
@@ -136,8 +143,8 @@ def register():
         db.session.add(new_user)
         db.session.commit()
         login_user(new_user)
-        return redirect(url_for("get_all_posts", current_user=current_user))
-    return render_template("register.html", form=form)
+        return redirect(url_for("get_all_posts"))
+    return render_template("register.html", form=form, current_user=current_user)
 
 
 # TODO: Retrieve a user from the database based on their email. 
@@ -156,12 +163,12 @@ def login():
         if check_password_hash(user.password, password=password):
             login_user(user)
             return redirect(url_for("get_all_posts"))
-    return render_template("login.html", form=form)
+    return render_template("login.html", form=form, current_user=current_user)
 
 
 @app.route('/logout')
 def logout():
-    logout_user(current_user)
+    logout_user()
     return redirect(url_for('get_all_posts'))
 
 
@@ -169,7 +176,7 @@ def logout():
 def get_all_posts():
     result = db.session.execute(db.select(BlogPost))
     posts = result.scalars().all()
-    return render_template("index.html", all_posts=posts)
+    return render_template("index.html", all_posts=posts, current_user=current_user)
 
 
 # TODO: Allow logged-in users to comment on posts
@@ -212,7 +219,7 @@ def add_new_post():
         db.session.add(new_post)
         db.session.commit()
         return redirect(url_for("get_all_posts"))
-    return render_template("make-post.html", form=form)
+    return render_template("make-post.html", form=form, current_user=current_user)
 
 
 # TODO: Use a decorator so only an admin user can edit a post
@@ -235,7 +242,7 @@ def edit_post(post_id):
         post.body = edit_form.body.data
         db.session.commit()
         return redirect(url_for("show_post", post_id=post.id))
-    return render_template("make-post.html", form=edit_form, is_edit=True)
+    return render_template("make-post.html", form=edit_form, is_edit=True, current_user=current_user)
 
 
 # TODO: Use a decorator so only an admin user can delete a post
@@ -249,13 +256,13 @@ def delete_post(post_id):
 
 @app.route("/about")
 def about():
-    return render_template("about.html")
+    return render_template("about.html",current_user=current_user)
 
 
 @app.route("/contact")
 def contact():
-    return render_template("contact.html")
+    return render_template("contact.html", current_user=current_user)
 
 
 if __name__ == "__main__":
-    app.run(debug=False, port=5002)
+    app.run(debug=True, port=5002)
